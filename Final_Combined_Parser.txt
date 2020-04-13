@@ -1,0 +1,675 @@
+'''
+This Python code extracts data from both FDPS and ITWS log files.  It conducts
+a series of transformations on the data, merges them together, and then
+conducts further transformations.  The end result is a dataset to be used
+for data visualization, machine learning, and analysis purposes.
+'''
+
+# Initial setup
+# Import necessary libraries
+import os
+import xml.etree.ElementTree as ET
+import pandas as pd
+import sqlite3 as db
+from datetime import datetime
+import calendar
+
+'''
+Messages in each log file are of specific types.  Only four types provide
+useful data to this project and they are captured by the "types" variable.
+Additionally, the project stakeholders provided us 50 US airports of interest
+on which to focus our work.  These are listed in the "airports" variable where
+the airport codes exist in both their ICAO (e.g., KLAX) and IATA (e.g., LAX)
+formats.
+'''
+
+# Establish filtering criteria for log file types and airport codes
+types = ['SCHEDULED', 'GENERAL', 'OTHER', 'NON_SCHEDULED']
+airports = ['KORD', 'ORD', 'KDEN', 'DEN', 'KSEA', 'SEA', 'KJFK', 'JFK',
+            'KLGA', 'LGA', 'KMCO', 'MCO', 'KRDM', 'RDM', 'KPDX', 'PDX',
+            'KPHL', 'PHL', 'KHPN', 'HPN', 'KEWR', 'EWR', 'KCOS', 'COS',
+            'KMSP', 'MSP', 'KMDW', 'MDW', 'KIPL', 'IPL', 'KTEB', 'TEB',
+            'KSMF', 'SMF', 'KBED', 'BED', 'KLAX', 'LAX', 'KIAD', 'IAD',
+            'KFAT', 'FAT', 'KLEB', 'LEB', 'KVRB', 'VRB', 'KNZY', 'NZY',
+            'KBFI', 'BFI', 'KABE', 'ABE', 'KBOS', 'BOS', 'KSFB', 'SFB',
+            'KATL', 'ATL', 'KDAB', 'DAB', 'KPWM', 'PWM', 'KBIL', 'BIL',
+            'KBHB', 'BHB', 'KSLC', 'SLC', 'KBWI', 'BWI', 'KMRY', 'MRY',
+            'KFLL', 'FLL', 'KOLS', 'OLS', 'KSFO', 'SFO', 'KLNS', 'LNS',
+            'KIAH', 'IAH', 'KABQ', 'ABQ', 'KDSM', 'DSM', 'KMKE', 'MKE',
+            'KGRR', 'GRR', 'KCID', 'CID', 'KPSC', 'PSC', 'KBUF', 'BUF',
+            'KRIC', 'RIC', 'KXNA', 'XNA']
+
+'''
+Log files are in the format "messages.log.xxx" where "xxx" is a number
+beginning with 101 and continuing to increment sequentially by one.  The start
+and end values for both FDPS and ITWS are created here as variables.
+'''
+
+# Establish starting and ending index numbers for FDPS message files
+start_FDPS = 101
+end_FDPS = 373
+
+# Establish starting and ending index numbers for ITWS message files
+start_ITWS = 101
+end_ITWS = 112
+
+
+# FDPS process
+# Select working directory for FDPS (all FDPS log files exist in this directory)
+os.chdir('C:\\...\\directory path containing all FDPS log files')
+
+'''
+This process opens each log file individually and parses out the individual
+messages contained within.  Each message is checked to ensure that is is of
+the proper log file type and that the origin and destination are both airports
+in the 50 of interest.  If not, then pass onto the next message.  Error handling
+also occurs in the event a message does not match expected structure.  The count
+of the number of errors is tracked to ensure that a reasonable number of messages
+are being passed through for data collection.
+'''
+
+# Initialize result array and error counter
+result_FDPS = []
+count_FDPS = 0
+
+# Process to build out FDPS dataset
+# Open file, read it in, parse it into separate XML messages
+for j in range(start_FDPS, end_FDPS + 1):
+    file = open('messages.log.' + str(j), "r")
+    text = file.read()
+    string = text.split('</ns5:MessageCollection>\n')
+    
+# Iterate through messages pulling out pertinent data for the dataset
+    for i in range(0, len(string) - 1):
+        try:
+            append = string[i] + '</ns5:MessageCollection>'
+            root = ET.fromstring(append)
+# Extract flight type, origin, and destination for filter comparison
+            for flight in root.iter('flight'):
+# Flight type and timestamp
+                flight_type = flight.attrib['flightType']
+                time_stamp = datetime.strptime(flight.attrib['timestamp']
+                    , '%Y-%m-%dT%H:%M:%S.%fZ')
+            for arrival in root.iter('arrival'):
+# Destination
+                dest = arrival.attrib['arrivalPoint']
+            for departure in root.iter('departure'):
+# Origin
+                orig = departure.attrib['departurePoint']
+# If passes filter criteria, then build out dataset
+            if flight_type in types and dest in airports and orig in airports:
+# Establish all airport codes as ICAO codes (4 characters beginning with K)
+                if len(orig) == 3:
+                    orig = 'K' + orig
+                if len(dest) == 3:
+                    dest = 'K' + dest
+# Determine date and hour of the datetime stamp
+                time_stamp_hr = datetime(time_stamp.year, time_stamp.month
+                                         , time_stamp.day, time_stamp.hour)
+                for route in root.iter('route'):
+# Flight route
+                    flight_route = route.attrib['nasRouteText']
+                for aircraft in root.iter('icaoModelIdentifier'):
+# Aircraft type
+                    aircraft_type = aircraft.text
+                for flight_id in root.iter('flightIdentification'):
+# Flight identifier
+                    flight_code = flight_id.attrib['aircraftIdentification']
+                for speed in root.iter('nasAirspeed'):
+# Airspeed and airspeed unit of measure (convert all airspeeds to knots)
+                    airspeed_uom = speed.attrib['uom']
+                    if airspeed_uom == 'MACH':
+                        airspeed = float(speed.text) * 666.739
+                        airspeed_uom = 'KNOTS'
+                    else:
+                        airspeed = float(speed.text)
+                for alt in root.iter('simple'):
+# Altitude and altitude unit of measure (all altitudes appear to be in feet)
+                    altitude = float(alt.text)
+                    altitude_uom = alt.attrib['uom']
+# Arrival time; set to null if does not exist in message
+                arr_time = None
+                arr_day = None
+                arr_hour = None
+                for arrival in root.iter('arrival'):
+                    for child in arrival:
+                        if child.tag == 'runwayPositionAndTime':
+                            arr_time = datetime.strptime(child[0][0].attrib['time']
+                                , '%Y-%m-%dT%H:%M:%SZ')
+                            arr_day = calendar.day_abbr[arr_time.weekday()]
+                            arr_hour = arr_time.strftime('%H')
+# Departure time; set to null if does not exist in message
+                dep_time = None
+                dep_day = None
+                dep_hour = None
+                flight_time = None
+                for departure in root.iter('departure'):
+                    for child in departure:
+                        if child.tag == 'runwayPositionAndTime':
+                            dep_time = datetime.strptime(child[0][0].attrib['time']
+                                , '%Y-%m-%dT%H:%M:%SZ')
+                            dep_day = calendar.day_abbr[dep_time.weekday()]
+                            dep_hour = dep_time.strftime('%H')
+                            flight_time = arr_time - dep_time
+# Global flight identifier
+                for gufi in root.iter('gufi'):
+                    guf_id = gufi.text
+# Flight plan ID
+                for plan in root.iter('flightPlan'):
+                    flt_pln_id = plan.attrib['identifier']
+# Build interim list for appending to result array
+                interim = [time_stamp, time_stamp_hr, flight_type, guf_id
+                           , flight_code, aircraft_type, orig, dep_time, dep_day
+                           , dep_hour, dest, arr_time, arr_day, arr_hour
+                           , flight_time, airspeed, airspeed_uom, altitude
+                           , altitude_uom, flight_route, flt_pln_id]
+# Append interim list to result array
+                result_FDPS.append(interim)
+# Exception handles situations where no flight type exists in the message
+        except:
+            count_FDPS = count_FDPS + 1
+
+# Convert to a pandas dataframe and add column headers
+result_pd = pd.DataFrame(result_FDPS)
+result_pd.columns = ['time_stamp', 'time_stamp_hr', 'flight_type', 'gufi'
+                     , 'flight_code', 'aircraft_type', 'origin', 'depart_time'
+                     , 'depart_day', 'depart_hour', 'destination', 'arrive_time'
+                     , 'arrive_day', 'arrive_hour', 'flight_time', 'airspeed'
+                     , 'airspeed_uom' , 'altitude', 'altitude_uom', 'flight_route'
+                     , 'flight_plan_id']
+
+'''
+Before moving forward, we have to ensure that all aircraft types captured by the
+data collection are covered in terms of aircraft category and number of engines.
+Aircraft categories are:  HELO, JET, PISTON, and TURBOPROP
+Engine numbers are:  ONE, TWO, THREE, and FOUR
+We create a list of unique aircraft types and compare it to the previously collected
+list (maintained in a separate spreadsheet).  Any new aircraft type that has arisen
+needs to be categorized and number of engines determined.  This was done via the
+following website:  https://www.icao.int/publications/DOC8643/Pages/Search.aspx
+Add aircraft types to the lists below appropriately based on this information.
+'''
+
+# Extract unique aircraft types
+aircrft = pd.DataFrame(result_pd.aircraft_type.unique())
+# This list needs to be used to compare against any prior lists to determine if
+# additional aircraft types need to be added to the lists that follow
+
+# Lists of various aircraft types by aircraft categories
+helo = ['A139', 'B06']
+
+piston = ['AC50', 'BE33', 'BE35', 'BE36', 'BE55', 'BE58', 'BE65', 'BE76', 'C172'
+          , 'C182', 'C206', 'C210', 'C310', 'C337', 'C340', 'C402', 'C414', 'C421'
+          , 'C82R', 'COL3', 'COL4', 'DA40', 'DA42', 'DA50', 'G280', 'LNC4', 'M20P'
+          , 'M20T', 'P28A', 'P28R', 'P32R', 'P337', 'PA31', 'PA32', 'PA34', 'PA44'
+          , 'PA46', 'R44', 'RV6', 'S22T', 'SR20', 'SR22', 'T206', 'T210', 'Z42']
+
+turboprop = ['AT46', 'AT76', 'B190', 'B350', 'B505', 'BE20', 'BE30', 'BE99', 'BE9L'
+             , 'BE9T', 'C208', 'C441', 'DH8D', 'DHC6', 'E120', 'EPIC', 'EVOT'
+             , 'M600', 'P180', 'P46T', 'PAY1', 'PAY3', 'PC12', 'S76', 'SF34'
+             , 'SW4', 'TBM7', 'TBM8', 'TBM9']
+# Any aircraft type not in these previous lists is assumed to be a jet
+
+# Lists of various aircraft types by number of engines
+one = ['B06', 'B505', 'BE33', 'BE35', 'BE36', 'C172', 'C182', 'C206', 'C208'
+       , 'C210', 'C82R', 'COL3', 'COL4', 'DA40', 'DA50', 'EPIC', 'EVOT', 'G280'
+       , 'L29', 'LNC4', 'M20P', 'M20T', 'M600', 'P28A', 'P28R', 'P32R', 'P46T'
+       , 'PA32', 'PA46', 'PC12', 'R44', 'RV6', 'S22T', 'SF50', 'SR20', 'SR22'
+       , 'SW4', 'T206', 'T210', 'TBM7', 'TBM8', 'TBM9', 'Z42']
+
+three = ['DC10', 'F900', 'FA50', 'FA7X', 'FA8X', 'MD11']
+
+four = ['A124', 'A343', 'A388', 'B703', 'B744', 'B748']
+# Any aircraft type not in these previous lists is assumed to have two engines
+
+'''
+These next steps involve a series of transformations, calculations, and additions
+to the data.  The "covid_flag" variable was created to attempt to capture the affects
+of the Federal emergency declaration of March 13 related to the COVID-19 virus.
+Following that, a significant decline in air travel began.  So, I flagged all dates
+after March 16 at midnight (Monday following the announcement).  The end result
+is to place the final Pandas dataframe into a database table for further analysis.
+'''
+
+# Convert flight time in timedelta format to minutes
+result_pd['flight_time'] = result_pd['flight_time'].astype('timedelta64[s]') / 60
+
+# Categorize aircraft by type
+result_pd['aircraft_cat'] = result_pd['aircraft_type'].apply(lambda x: 'HELO' if
+         x in helo else ('PISTON' if x in piston else ('TURBOPROP' if x in turboprop
+         else ('NA' if x == 'ZZZZ' else 'JET'))))
+
+# Categorize aircraft by number of engines
+result_pd['engine_num'] = result_pd['aircraft_type'].apply(lambda x: 'ONE' if
+         x in one else ('THREE' if x in three else ('FOUR' if x in four else (
+         'NA' if x == 'ZZZZ' else 'TWO'))))
+
+# Flag dates past March 16 at midnight resulting from Federal emergency declaration
+result_pd['covid_flag'] = result_pd['time_stamp'].apply(lambda x: 'POST' if
+         x >= datetime(2020, 3, 16, 0) else 'PRE')
+
+# Set up the result pandas dataframe as a database
+conn = db.connect('FAAResults.db')
+c = conn.cursor()
+result_pd.to_sql('FAAdataset', conn, if_exists = 'replace', index = False)
+
+'''
+This section runs through a series of transformations with the dataset leveraging
+SQL.  The Global Unique Flight Identifier (GUFI) is unique to each flight.  However,
+it appears multiple times in the dataset because each flight can appear multiple
+times with different timestamps.  We only want one flight route per GUFI.  This is
+obtained by taking the oldest timestamp for each GUFI.  In other words, the one
+closest to original flight departure.  Some other modifications are done as follows:
+    - Removal of null arrival and departure times
+    - Removal of aircraft types of 'ZZZZ' (essentially a null aircraft type)
+    - Removal of any records in the data that do not have a full flight route
+    - Removal of the suffix number on each flight route.  This gives the appearance
+        that the flight routes are different when they may not be.
+'''
+
+# Run query to illustrate how flight routes for same flight id (gufi) lay out over time
+pd.read_sql_query('''select time_stamp,
+                      flight_route
+                      from FAAdataset
+                      order by gufi, time_stamp
+                      limit 100
+                      ''', conn)
+# Need to take the first entry by time stamp of each flight id (gufi) series
+# Make the dataset be the initial date_time for each gufi
+# That represents the original flight route at flight initiation
+dataset = pd.read_sql_query('''select *
+                             from (
+                             select *,
+                             min(time_stamp) over (partition by gufi) as min_time
+                             from FAAdataset)
+                             where time_stamp = min_time
+                             and arrive_time is not null
+                             and depart_time is not null
+                             and aircraft_type <> 'ZZZZ'
+                             ''', conn)
+
+# Close database connection when done
+conn.close()
+
+# Set up the dataset data frame as a database
+conn_ds = db.connect('dsResults.db')
+c_ds = conn_ds.cursor()
+dataset.to_sql('ResultDataset', conn_ds, if_exists = 'replace', index = False)
+
+# Remove all remaining partial flight routes denoted by "./."
+# These are the flights caught in mid-air in the messages with no
+# initial flight route to which we can track back
+dataset = pd.read_sql_query('''select *
+                      from ResultDataset
+                      where flight_route not like '%./.%'
+                      ''', conn_ds)
+
+# Close database connection
+conn_ds.close()
+
+# Add an adjusted flight route column that removes the suffix number from
+# the original flight route in the dataset
+dataset['flt_rte_adj'] = dataset['flight_route'].apply(lambda x: x.split(
+        '/')[0] if '/' in x else x)
+
+# Write the dataset data frame to a CSV file for further analysis as needed
+dataset.to_csv('dataset.csv', index = False, header = True)
+
+
+'''
+These next steps do a similar thing with the ITWS log files as what was done with
+the FDPS log files.  Different data are collected but the overall basic methodologies
+are very similar.  The end result is a Pandas dataframe and a database table.
+'''
+# ITWS process
+# Select working directory for ITWS (ITWS log files should exist there)
+os.chdir('C:\\...\\directory path containing all ITWS log files')
+
+# Initialize result array and error counter
+result_ITWS = []
+count_ITWS = 0
+
+# Process to build out ITWS dataset
+# Open file, read it in, parse it into separate XML messages
+for j in range(start_ITWS, end_ITWS + 1):
+    file = open('messages.log.' + str(j), "r")
+    text = file.read()
+    string = text.split('</itws_msg>\n\n')
+    
+# Iterate through messages pulling out pertinent data for the dataset
+    for i in range(0, len(string) - 1):
+        try:
+            append = string[i] + '</itws_msg>'
+            root = ET.fromstring(append)
+# Extract airport for filter comparison
+            for airport in root.iter('product_header_airports'):
+                location = airport.text
+            # If passes filter criteria, then build out dataset
+            if location in airports:
+# Type of weather message
+                if len(location) == 3:
+                    location = 'K' + location
+                for msg_name in root.iter('product_msg_name'):
+                    msg_type = msg_name.text
+# Area affected by weather message
+                for site in root.iter('product_header_itws_sites'):
+                    area = site.text
+# Start time of message
+                for start_sec in root.iter('product_header_latency_start_seconds'):
+                    start_time = datetime.strptime(start_sec.attrib['gregorian']
+                                    , '%Y-%m-%d %H:%M:%S')
+                    start_time_hr = datetime(start_time.year, start_time.month
+                                             , start_time.day, start_time.hour)
+# Time message was generated
+                for gen_sec in root.iter('product_header_generation_time_seconds'):
+                    gen_time = datetime.strptime(gen_sec.attrib['gregorian']
+                                    , '%Y-%m-%d %H:%M:%S')
+# Expiration time of message
+                for exp_sec in root.iter('product_header_expiration_time_seconds'):
+                    exp_time = datetime.strptime(exp_sec.attrib['gregorian']
+                                    , '%Y-%m-%d %H:%M:%S')
+                    exp_time_hr = datetime(exp_time.year, exp_time.month
+                                           , exp_time.day, exp_time.hour)
+# Text of weather message
+                for w_text in root.iter('twx_text'):
+                    wthr = w_text.text.split('ITWS TERMINAL WX\n')[1]
+                    wthr_msg = wthr.replace('\n', '; ')
+# Build interim list for appending to result array
+                interim = [msg_type, location, area, start_time, start_time_hr
+                           , gen_time, exp_time, exp_time_hr, wthr_msg]
+                result_ITWS.append(interim)
+# Handles any messages not conforming to expected layout
+        except:
+            count_ITWS = count_ITWS + 1
+
+# Convert to a pandas dataframe and add column headers
+result_pd_ITWS = pd.DataFrame(result_ITWS)
+result_pd_ITWS.columns = ['msg_type', 'airport', 'area', 'start_time', 'start_time_hr'
+                          , 'generation_time', 'expiration_time', 'expiration_time_hour'
+                          , 'weather_message']
+
+# Set storm flag
+result_pd_ITWS['STORM'] = result_pd_ITWS['weather_message'].apply(lambda x: 'STORM'
+              if 'STORM(S)' in x else 'NO STORM')
+
+# Set up the result pandas dataframe as a database
+conn = db.connect('FAAResults_ITWS.db')
+c = conn.cursor()
+result_pd_ITWS.to_sql('FAAdataset_ITWS', conn, if_exists = 'replace', index = False)
+
+'''
+SQL is used for dataset transformations.  Only those airports reporting a storm
+are kept and the last timestamp for each hour is the record that is kept for
+that hour by airport.
+'''
+
+# Run query to illustrate how times lay out by airport
+pd.read_sql_query('''select airport,
+                      start_time,
+                      expiration_time,
+                      STORM
+                      from FAAdataset_ITWS
+                      order by airport, start_time
+                      limit 100
+                      ''', conn)
+# Partition by airport and start time but take maximum expiration time
+
+# Establish dataset as those entries where a storm exists and take last
+# weather report for each airport by hour
+dataset_ITWS = pd.read_sql_query('''select *
+                                 from (
+                                 select *,
+                                 max(expiration_time) over (partition by airport,
+                                        start_time_hr) as max_time
+                                 from FAAdataset_ITWS
+                                 where STORM = 'STORM'
+                                 )
+                                 where expiration_time = max_time
+                                 order by airport, start_time
+                                 ''', conn)
+
+# Close the database connection
+conn.close()
+
+# Write the dataset data frame to a CSV file for further analysis as needed
+dataset_ITWS.to_csv('wthr_dataset.csv', index = False, header = True)
+
+
+'''
+Storm data from ITWS is now incorporated into the FDPS dataset.  A "STORM" variable
+is flagged if a storm was reported at either the origin or destination airport
+at that hour for a particular flight.  Additionally, a field is added to capture
+the Origin-Destination Pair or OD Pair
+'''
+
+# Incorporate ITWS data into FDPS dataset
+# Input storm information into dataset
+storm_flag = []
+for m in range(0, len(dataset)):
+    orign = dataset['origin'][m]
+    destintn = dataset['destination'][m]
+    ts_hour = dataset['time_stamp_hr'][m]
+    orig_storm = len(dataset_ITWS[((dataset_ITWS['start_time_hr'] == ts_hour)
+                        | (dataset_ITWS['expiration_time_hour'] == ts_hour))
+                        & (dataset_ITWS['airport'] == orign)])
+    dest_storm = len(dataset_ITWS[((dataset_ITWS['start_time_hr'] == ts_hour)
+                        | (dataset_ITWS['expiration_time_hour'] == ts_hour))
+                        & (dataset_ITWS['airport'] == destintn)])
+    if orig_storm > 0 or dest_storm > 0:
+        storm_flag.append('STORM')
+    else:
+        storm_flag.append('NO STORM')
+dataset['storm'] = storm_flag
+
+# Put the origin-destination pair as a column in the dataset
+dataset['od_pairs'] = dataset['origin'] + '-' + dataset['destination']
+
+# Switch back to working directory for FDPS
+os.chdir('C:\\...\\directory path containing all FDPS log files')
+
+# Write the dataset data frame to a CSV file for further analysis as needed
+dataset.to_csv('dataset.csv', index = False, header = True)
+
+# Set up the dataset with weather data dataframe as a database
+conn_ds = db.connect('dsResults.db')
+c_ds = conn_ds.cursor()
+dataset.to_sql('ResultDataset', conn_ds, if_exists = 'replace', index = False)
+
+'''
+The next sequence of code attempts to flag all routes between each OD Pair that
+are the most frequent routes and all others as deviations from the most frequent
+route.  In doing so, we eliminate some records as follows:
+    - All OD Pairs where the origin is the same as the destination.
+    - All OD Pairs that have only one route between them.
+    - All OD Pairs that do not have a unique most frequent route
+The end result after all of this is a Pandas dataframe and a database table
+containing the final dataset.
+'''
+
+# Take an initial look at the dataset with respect to OD pairs & flight routes
+pd.read_sql_query('''select od_pairs,
+                      flt_rte_adj,
+                      count(*) as count
+                      from ResultDataset
+                      group by od_pairs, flt_rte_adj
+                      order by od_pairs, count(*) desc
+                      limit 100
+                      ''', conn_ds)
+# Immediately see some OD Pairs where origin and destination are the same
+# How often does that occur?
+pd.read_sql_query('''select count(*) as count
+                      from ResultDataset
+                      where origin = destination
+                      ''', conn_ds)
+# 1748 records
+# Re-run the query eliminating those records where origin equals destination
+pd.read_sql_query('''select od_pairs,
+                      flt_rte_adj,
+                      count(*) as count
+                      from ResultDataset
+                      where origin <> destination
+                      group by od_pairs, flt_rte_adj
+                      order by od_pairs, count(*) desc
+                      ''', conn_ds)
+
+# Look at the number of unique routes per OD pair
+pd.read_sql_query('''select od_pairs,
+                      count(*) as route_count
+                      from (
+                          select od_pairs,
+                          flt_rte_adj,
+                          count(*) as count
+                          from ResultDataset
+                          where origin <> destination
+                          group by od_pairs, flt_rte_adj
+                          )
+                      group by od_pairs
+                      order by count(*) desc
+                      limit 100
+                      ''', conn_ds)
+
+# Run query to select most frequent route for each OD pair
+# Each route in this list must show up more than once in the data
+pd.read_sql_query('''select od_pairs,
+                      flt_rte_adj,
+                      max_count
+                      from (
+                      select *,
+                      max(count) over (partition by od_pairs) as max_count
+                      from (
+                              select od_pairs,
+                              flt_rte_adj,
+                              count(*) as count
+                              from ResultDataset
+                              where origin <> destination
+                              group by od_pairs, flt_rte_adj
+                              having count(*) > 1
+                              order by od_pairs, count(*) desc
+                              ))
+                      where count = max_count 
+                      limit 100
+                      ''', conn_ds)
+
+# Generate list of the most frequent flight routes for each OD pair
+# Each route in this list must show up more than once in the data
+freq_routes = pd.read_sql_query('''select flt_rte_adj
+                                  from (
+                                  select *,
+                                  max(count) over (partition by od_pairs) as max_count
+                                  from (
+                                          select od_pairs,
+                                          flt_rte_adj,
+                                          count(*) as count
+                                          from ResultDataset
+                                          where origin <> destination
+                                          group by od_pairs, flt_rte_adj
+                                          having count(*) > 1
+                                          order by od_pairs, count(*) desc
+                                          ))
+                                  where count = max_count 
+                                  ''', conn_ds)
+
+# Query how many different flight routes are the most frequent for each OD pair
+# Each route in this list must show up more than once in the data
+pd.read_sql_query('''select od_pairs,
+                      max_count,
+                      count(*) as count
+                      from (
+                          select od_pairs,
+                          flt_rte_adj,
+                          max_count
+                          from (
+                          select *,
+                          max(count) over (partition by od_pairs) as max_count
+                          from (
+                                  select od_pairs,
+                                  flt_rte_adj,
+                                  count(*) as count
+                                  from ResultDataset
+                                  where origin <> destination
+                                  group by od_pairs, flt_rte_adj
+                                  having count(*) > 1
+                                  order by od_pairs, count(*) desc
+                                  ))
+                          where count = max_count
+                          )
+                      group by od_pairs, max_count
+                      limit 100
+                      ''', conn_ds)
+
+# Generate list of OD pairs having only one most frequent route
+# Each most frequent route generated must appear more than once in the data
+od_pairs = pd.read_sql_query('''select od_pairs
+                             from (
+                              select od_pairs,
+                              flt_rte_adj,
+                              max_count
+                              from (
+                              select *,
+                              max(count) over (partition by od_pairs) as max_count
+                              from (
+                                      select od_pairs,
+                                      flt_rte_adj,
+                                      count(*) as count
+                                      from ResultDataset
+                                      where origin <> destination
+                                      group by od_pairs, flt_rte_adj
+                                      having count(*) > 1
+                                      order by od_pairs, count(*) desc
+                                      ))
+                              where count = max_count
+                              )
+                          group by od_pairs
+                          having count(*) = 1
+                          ''', conn_ds)
+
+# Close the database connection
+conn_ds.close()
+                              
+# Add a column to the dataset that flags when the route deviates from the
+# most frequent route between two OD pair cities
+f_route = []
+for n in range(0, len(dataset)):
+    if dataset['od_pairs'][n] in od_pairs.iloc[:, 0].values:
+        if dataset['flt_rte_adj'][n] in freq_routes.iloc[:, 0].values:
+            f_route.append(0)
+        else:
+            f_route.append(1)
+    else:
+        f_route.append(1)
+dataset['route_dev'] = f_route
+
+# Reduce dataset down to only those OD pairs from the od_pairs list where:
+# Origin does not equal destination
+# Each OD pair has one unique most frequent flight route
+# Each OD pair's most frequent flight route occurs more then once in the data
+dataset_flights = dataset[dataset['od_pairs'].isin(od_pairs.iloc[:, 0].values)]
+
+# Set up the flight dataset as a database
+conn_dsf = db.connect('dsResultsFlights.db')
+c_dsf = conn_dsf.cursor()
+dataset_flights.to_sql('ResultFlightsDataset', conn_dsf, if_exists = 'replace', index = False)
+
+# Find any OD pairs with only one route between the two cities
+one_route = pd.read_sql_query('''select od_pairs
+                      from (
+                          select od_pairs,
+                          flt_rte_adj,
+                          count(*) as count
+                          from ResultFlightsDataset
+                          group by od_pairs, flt_rte_adj
+                          order by od_pairs, count(*) desc
+                          )
+                      group by od_pairs
+                      having count(*) = 1
+                      ''', conn_dsf)
+
+# Close the database connection
+conn_dsf.close()
+
+# Remove the single route OD pairs from the dataset
+dataset_flights = dataset_flights[~dataset_flights['od_pairs'].isin(one_route.iloc[:, 0].values)]
+
+# Write the flights dataset data frame to a CSV file for further analysis
+dataset_flights.to_csv('dataset_flights.csv', index = False, header = True)
+

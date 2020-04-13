@@ -1,0 +1,118 @@
+# Initial setup
+# Import necessary libraries
+import pandas as pd
+import os
+import numpy as np
+import graphviz
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import accuracy_score
+from sklearn import tree
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix
+
+# Set working directory
+os.chdir('C:\\directory path containing the dataset')
+
+# Read in the dataset
+data = pd.read_csv('dataset_flights_ATL_LAX.csv')
+
+# Filter dataset down to only the pertinent machine learning columns
+data = data[['route_name', 'altitude', 'airspeed', 'storm', 'covid_flag',  'arrive_day'
+             , 'depart_day', 'arrive_hour', 'depart_hour']]
+
+# Categorize the route_name column (categorical variable)
+data['route_name'] = data['route_name'].astype('category')
+data['route_name_cat'] = data['route_name'].cat.codes
+
+# Move the categorized route name column to the front of the data frame
+col = data.pop('route_name_cat')
+data.insert(1, col.name, col)
+
+# Create all necessary categorical dummy variable columns
+data_cat = pd.get_dummies(data, columns = ['arrive_day', 'depart_day', 'storm'
+                                           ,'covid_flag', 'arrive_hour', 'depart_hour']
+                            , prefix = ['arrday', 'depday', 'wthr', 'cov'
+                                        , 'arrhr', 'dephr'])
+
+# Pull out the predictive and categorical variables from the data
+pred_var = data_cat.iloc[:, 2:].values
+cat_var = data_cat.iloc[:, 1].values
+pred_headers = data_cat.columns[2:]
+
+
+# Decision Tree algorithm
+# Set up Decision Tree classifier and perform cross-validation for accuracy
+split = int(round(0.1 * len(pred_var), 0))
+classifier_dt = DecisionTreeClassifier(criterion = 'entropy', random_state = 0,
+                                    min_impurity_decrease = 0.001,
+                                    min_samples_split = split)
+scores = cross_val_score(classifier_dt, pred_var, cat_var, cv = 4)
+print('Mean Accuracy = ', '{:.2%}'.format(np.mean(scores)))
+
+# Fit classifier
+classifier_dt.fit(pred_var, cat_var)
+# Split data into training and test sets & make predictions using test set
+pred_train, pred_test, cat_train, cat_test = train_test_split(pred_var, cat_var
+                                              , test_size = 0.25,random_state = 0)
+cat_pred_dt = classifier_dt.predict(pred_test)
+
+# Calculate confusion matrix on test set predictions
+cm = confusion_matrix(cat_test, cat_pred_dt)
+cm_columns = ['NAJTN Predict', 'OTH Predict', 'SAJTS Predict']
+cm_rows = ['NAJTN Actual', 'OTH Actual', 'SAJTS Actual']
+cm_df = pd.DataFrame(cm, columns = cm_columns, index = cm_rows)
+print(cm_df)
+print('\n')
+print('Total Accuracy = ', '{:.2%}'.format(accuracy_score(cat_test, cat_pred_dt)))
+print('True NAJTN Pred Rate = ', '{:.2%}'.format(cm[0, 0]/sum(cm[0, :])))
+print('True OTH Pred Rate = ', '{:.2%}'.format(cm[1, 1] / sum(cm[1, :])))
+print('True SAJTS Pred Rate = ', '{:.2%}'.format(cm[2, 2] / sum(cm[2, :])))
+
+# Build out decision tree visual graphic
+dot_data = tree.export_graphviz(classifier_dt, out_file = None,
+                                feature_names = pred_headers, impurity = False
+                                , proportion = True)
+graph = graphviz.Source(dot_data)
+graph.render('flight_tree_ATL_LAX', view = True)
+
+
+# Dimension reduction with PCA
+# Import necessary libraries
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+
+# Scale and then transform, using PCA, the predictive variables
+sc = StandardScaler()
+pred_scale = sc.fit_transform(pred_var)
+pca = PCA(n_components = None, random_state = 0)
+pred_xfrm = pca.fit_transform(pred_scale)
+
+# K Nearest Neighbor (KNN) algorithm using dimension reduction
+# Import necessary library for KNN
+from sklearn.neighbors import KNeighborsClassifier
+
+# Set up KNN classifier and perform cross-validation for accuracy
+classifier_knn = KNeighborsClassifier(n_neighbors = 50, metric = 'minkowski')
+scores = cross_val_score(classifier_knn, pred_xfrm, cat_var, cv = 4)
+print('Mean Accuracy = ', '{:.2%}'.format(np.mean(scores)))
+
+# Fit classifier
+classifier_dt.fit(pred_xfrm, cat_var)
+# Split data into training and test sets & make predictions using test set
+pred_train, pred_test, cat_train, cat_test = train_test_split(pred_xfrm, cat_var
+                                              , test_size = 0.25,random_state = 0)
+cat_pred_dt = classifier_dt.predict(pred_test)
+
+# Calculate confusion matrix on test set predictions
+cm = confusion_matrix(cat_test, cat_pred_dt)
+cm_columns = ['NAJTN Predict', 'OTH Predict', 'SAJTS Predict']
+cm_rows = ['NAJTN Actual', 'OTH Actual', 'SAJTS Actual']
+cm_df = pd.DataFrame(cm, columns = cm_columns, index = cm_rows)
+print(cm_df)
+print('\n')
+print('Total Accuracy = ', '{:.2%}'.format(accuracy_score(cat_test, cat_pred_dt)))
+print('True NAJTN Pred Rate = ', '{:.2%}'.format(cm[0, 0]/sum(cm[0, :])))
+print('True OTH Pred Rate = ', '{:.2%}'.format(cm[1, 1] / sum(cm[1, :])))
+print('True SAJTS Pred Rate = ', '{:.2%}'.format(cm[2, 2] / sum(cm[2, :])))
+

@@ -1,0 +1,42 @@
+'''
+This code will take a list of flight routes between some OD Pair and perform
+textual analysis on it.  Specifically, it pulls out groupings of four contiguous
+flight route points and determines which groupings occurs most frequently in the
+data.  This should help look for commonalities amongst different routes.
+'''
+
+'''
+*************************VERY IMPORTANT**************************
+The comma-delimited file cotaining the flight routes will likely need to be
+modified slightly from that obtained via Tableua.  Specifically, we need to 
+ensure that all points along each route are separated by a single period '.'.
+Some points are separated by two periods '..'.  Make necessary replacements in the
+data to ensure that only one period '.' separates flight route points.
+*************************VERY IMPORTANT**************************
+'''
+
+# Import necessary libraries
+import pandas as pd
+import os
+from collections import defaultdict
+
+# Set working directory
+os.chdir('C:\\directory path containing the pertinent flight routes file')
+
+# Read in the dataset
+data1 = pd.read_csv('name of file containing appropriate routes')
+
+# Set up default dictionary for four-item combinations and populate it accordingly
+rte_combo = defaultdict(int)
+for rte in data1['flt_rte_adj']:
+    points = rte.split('.')
+    contig_pts = list(tuple(points[x: x + 4]) for x in range(len(points) - 3))
+    for contig_pt in contig_pts:
+        rte_combo[contig_pt] += 1
+
+# Convert each of the default dictionaries into Pandas data frames for
+# potential further analysis
+rc_sort = pd.DataFrame(sorted(rte_combo.items(), key = lambda items: items[1]
+            , reverse = True))
+
+    
